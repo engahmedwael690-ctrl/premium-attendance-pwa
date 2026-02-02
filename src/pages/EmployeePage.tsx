@@ -19,6 +19,8 @@ type StoredSession = {
   id: string
 }
 
+type GeoPermissionState = 'granted' | 'denied' | 'prompt' | 'unsupported' | 'error'
+
 const STORAGE_KEYS = {
   employeeName: 'employeeName',
   employeeCode: 'employeeCode',
@@ -56,8 +58,55 @@ const clearStoredSession = () => {
   localStorage.removeItem(STORAGE_KEYS.activeSessionId)
 }
 
+const isLocalhost = () =>
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1' ||
+  window.location.hostname === '[::1]'
+
+const getGeolocationPermissionState = async (): Promise<GeoPermissionState> => {
+  if (!navigator.permissions?.query) return 'unsupported'
+  try {
+    const status = await navigator.permissions.query({
+      name: 'geolocation' as PermissionName,
+    })
+    return status.state
+  } catch {
+    return 'error'
+  }
+}
+
+const formatGeolocationError = (
+  err: unknown,
+  permissionState: GeoPermissionState,
+) => {
+  if (!window.isSecureContext && !isLocalhost()) {
+    return 'Location blocked: this site is not secure. Use HTTPS (or localhost).'
+  }
+
+  if (permissionState === 'denied') {
+    return 'Location permission denied in browser settings. Allow location for this site and retry.'
+  }
+
+  const geoError = err as GeolocationPositionError
+  if (typeof geoError?.code === 'number') {
+    if (geoError.code === 1)
+      return 'Location permission denied. Please allow location for this site.'
+    if (geoError.code === 2)
+      return 'Location unavailable. Turn on GPS/Location services and try again.'
+    if (geoError.code === 3) return 'Location timeout. Please try again.'
+    return 'Location error. Please try again.'
+  }
+
+  if (err instanceof Error && err.message) return err.message
+  return 'Unable to get location. Please check browser and device settings.'
+}
+
 const getCurrentPosition = () =>
   new Promise<GeolocationPosition>((resolve, reject) => {
+    if (!window.isSecureContext && !isLocalhost()) {
+      reject(new Error('Geolocation requires HTTPS or localhost.'))
+      return
+    }
     if (!navigator.geolocation) {
       reject(new Error('Geolocation is not supported on this device.'))
       return
@@ -75,10 +124,7 @@ const getCurrentPosition = () =>
       resolve,
       (err) => {
         // لو high accuracy فشل/اتأخر جرّب low accuracy
-        if (
-          err.code === err.TIMEOUT ||
-          err.code === err.POSITION_UNAVAILABLE
-        ) {
+        if (err.code === 2 || err.code === 3) {
           tryLowAccuracy()
           return
         }
@@ -172,18 +218,9 @@ function EmployeePage() {
       setMessage('Checked in successfully.')
     } catch (err) {
       console.log('CHECK-IN ERROR:', err)
-
-      const e = err as GeolocationPositionError
-      if (typeof e?.code === 'number') {
-        if (e.code === 1) setError('Location permission denied. Please allow location for this site.')
-        else if (e.code === 2) setError('Location unavailable. Turn on GPS/Location services and try again.')
-        else if (e.code === 3) setError('Location timeout. Please try again.')
-        else setError('Location error. Please try again.')
-        return
-      }
-
-      // لو مش Geolocation error، غالبًا Firestore/Auth/Rules
-      setError('Check-in failed. Please try again.')
+      const permissionState = await getGeolocationPermissionState()
+      console.log('CHECK-IN GEO PERMISSION:', permissionState)
+      setError(formatGeolocationError(err, permissionState))
     } finally {
       setLoading(false)
     }
@@ -213,17 +250,9 @@ function EmployeePage() {
       setMessage('Checked out successfully.')
     } catch (err) {
       console.log('CHECK-OUT ERROR:', err)
-
-      const e = err as GeolocationPositionError
-      if (typeof e?.code === 'number') {
-        if (e.code === 1) setError('Location permission denied. Please allow location for this site.')
-        else if (e.code === 2) setError('Location unavailable. Turn on GPS/Location services and try again.')
-        else if (e.code === 3) setError('Location timeout. Please try again.')
-        else setError('Location error. Please try again.')
-        return
-      }
-
-      setError('Check-out failed. Please try again.')
+      const permissionState = await getGeolocationPermissionState()
+      console.log('CHECK-OUT GEO PERMISSION:', permissionState)
+      setError(formatGeolocationError(err, permissionState))
     } finally {
       setLoading(false)
     }
