@@ -8,13 +8,15 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png'],
       manifest: pwaManifest,
       workbox: {
+        cleanupOutdatedCaches: true,
+        navigateFallback: '/index.html',
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,json,txt}'],
         skipWaiting: true,
         clientsClaim: true,
-        globIgnores: ['**/index.html'],
         runtimeCaching: [
           {
             urlPattern: ({ request }) => request.mode === 'navigate',
