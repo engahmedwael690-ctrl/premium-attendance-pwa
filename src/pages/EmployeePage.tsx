@@ -1,6 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { signInAnonymously } from 'firebase/auth'
+import { auth } from '../lib/firebase/auth'
+
 import { findActiveEmployeeByCode } from '../features/employees/employees.service'
 import {
   createSessionCheckIn,
@@ -59,10 +62,34 @@ const getCurrentPosition = () =>
       reject(new Error('Geolocation is not supported on this device.'))
       return
     }
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 15000,
-    })
+
+    const tryLowAccuracy = () => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 20000,
+        maximumAge: 60000,
+      })
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      resolve,
+      (err) => {
+        // لو high accuracy فشل/اتأخر جرّب low accuracy
+        if (
+          err.code === err.TIMEOUT ||
+          err.code === err.POSITION_UNAVAILABLE
+        ) {
+          tryLowAccuracy()
+          return
+        }
+        reject(err)
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      },
+    )
   })
 
 function EmployeePage() {
@@ -77,6 +104,15 @@ function EmployeePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+
+  // ✅ مهم: خلي الموظف يبقى authenticated (anonymous) علشان يقدر يكتب sessions
+  useEffect(() => {
+    if (!auth.currentUser) {
+      signInAnonymously(auth).catch((e) => {
+        console.log('Anonymous auth failed:', e)
+      })
+    }
+  }, [])
 
   const statusText = useMemo(() => {
     if (!employee) return ''
@@ -105,6 +141,7 @@ function EmployeePage() {
       setCode('')
       setMessage('Login successful.')
     } catch (err) {
+      console.log('LOGIN ERROR:', err)
       setError('Failed to login. Please try again.')
     } finally {
       setLoading(false)
@@ -120,18 +157,33 @@ function EmployeePage() {
     setLoading(true)
     setError('')
     setMessage('')
+
     try {
       const position = await getCurrentPosition()
+
       const sessionId = await createSessionCheckIn(employee.name, employee.code, {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         accuracy: position.coords.accuracy ?? null,
       })
+
       writeStoredSession(sessionId)
       setActiveSession({ id: sessionId })
       setMessage('Checked in successfully.')
     } catch (err) {
-      setError('Unable to check in. Please allow location access.')
+      console.log('CHECK-IN ERROR:', err)
+
+      const e = err as GeolocationPositionError
+      if (typeof e?.code === 'number') {
+        if (e.code === 1) setError('Location permission denied. Please allow location for this site.')
+        else if (e.code === 2) setError('Location unavailable. Turn on GPS/Location services and try again.')
+        else if (e.code === 3) setError('Location timeout. Please try again.')
+        else setError('Location error. Please try again.')
+        return
+      }
+
+      // لو مش Geolocation error، غالبًا Firestore/Auth/Rules
+      setError('Check-in failed. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -146,18 +198,32 @@ function EmployeePage() {
     setLoading(true)
     setError('')
     setMessage('')
+
     try {
       const position = await getCurrentPosition()
+
       await updateSessionCheckOut(activeSession.id, {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         accuracy: position.coords.accuracy ?? null,
       })
+
       clearStoredSession()
       setActiveSession(null)
       setMessage('Checked out successfully.')
     } catch (err) {
-      setError('Unable to check out. Please allow location access.')
+      console.log('CHECK-OUT ERROR:', err)
+
+      const e = err as GeolocationPositionError
+      if (typeof e?.code === 'number') {
+        if (e.code === 1) setError('Location permission denied. Please allow location for this site.')
+        else if (e.code === 2) setError('Location unavailable. Turn on GPS/Location services and try again.')
+        else if (e.code === 3) setError('Location timeout. Please try again.')
+        else setError('Location error. Please try again.')
+        return
+      }
+
+      setError('Check-out failed. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -179,6 +245,7 @@ function EmployeePage() {
           <h1>Employee Login</h1>
           <p>Enter your employee code to continue.</p>
         </header>
+
         <form className="card form stack" onSubmit={handleLogin}>
           <label className="field">
             <span>Employee code</span>
@@ -194,7 +261,9 @@ function EmployeePage() {
               disabled={loading}
             />
           </label>
+
           {error ? <p className="form__error">{error}</p> : null}
+
           <button className="button button--primary" type="submit" disabled={loading}>
             {loading ? 'Logging in...' : 'Login'}
           </button>
@@ -209,9 +278,11 @@ function EmployeePage() {
         <h1>Hi {employee.name}!</h1>
         <p>{statusText}</p>
       </header>
+
       <section className="card stack">
         {message ? <p className="notice">{message}</p> : null}
         {error ? <p className="form__error">{error}</p> : null}
+
         <div className="grid">
           <button
             className="button button--primary"
@@ -221,6 +292,7 @@ function EmployeePage() {
           >
             {loading && !activeSession ? 'Checking in...' : 'Check-in'}
           </button>
+
           <button
             className="button button--ghost"
             type="button"
@@ -231,8 +303,9 @@ function EmployeePage() {
           </button>
         </div>
       </section>
+
       <button className="link link-button" type="button" onClick={handleBackToLogin}>
-        Back 
+        Back
       </button>
     </main>
   )
