@@ -22,11 +22,6 @@ export default defineConfig({
             options: {
               cacheName: 'documents',
               networkTimeoutSeconds: 5,
-              plugins: [
-                {
-                  handlerDidError: async () => caches.match('/offline.html'),
-                },
-              ],
               expiration: {
                 maxEntries: 20,
                 maxAgeSeconds: 60 * 60 * 24,

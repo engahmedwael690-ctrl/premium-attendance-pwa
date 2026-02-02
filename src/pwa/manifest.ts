@@ -3,7 +3,7 @@ export const pwaManifest = {
   short_name: 'Attendance',
   description: 'Premium attendance and tracking PWA.',
   start_url: '/',
-  display: 'standalone',
+  display: 'standalone' as const,
   background_color: '#f7f7f2',
   theme_color: '#0b5b3f',
   icons: [

@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { signOut } from 'firebase/auth'
 import { Timestamp } from 'firebase/firestore'
 import * as XLSX from 'xlsx'
